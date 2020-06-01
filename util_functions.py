@@ -6,6 +6,23 @@ import math
 import time
 
 
+# Constants
+COLS = 1280
+ROWS = 720
+
+HFOV = 1.18997230395261 # 1.18124533204579
+VFOV = 0.726878003768506 # 0.72083537591355
+VCENTRE = (ROWS - 1) / float(2)
+HCENTRE = (COLS -1) / float(2)
+A = -3.38769422283892e-06 # -6.74058700563481e-06
+B = -0.0039721384171171 # 0.0162142413358919
+C = 1.35603974925075 # -15.1823712120162
+
+VSIZE = math.tan(VFOV / 2) * 2
+HSIZE = math.tan(VFOV / 2) * 2
+VPIXEL = VSIZE / (ROWS - 1)
+HPIXEL = HSIZE / (COLS - 1)
+
 
 def get_intrinsics(profile):
 	# Get intrinsics
@@ -40,9 +57,33 @@ Z : double
 	The z value in meters
 """
 def convert_depth_pixel_to_metric_coordinate(depth, pixel_x, pixel_y, camera_intrinsics):
-	X = (pixel_x - camera_intrinsics.ppx)/camera_intrinsics.fx *depth
-	Y = (pixel_y - camera_intrinsics.ppy)/camera_intrinsics.fy *depth
+	X = (pixel_x - camera_intrinsics.ppx)/camera_intrinsics.fx * depth
+	Y = (pixel_y - camera_intrinsics.ppy)/camera_intrinsics.fy * depth
 	return X, Y, depth
+
+def read_balance_file():
+	balance = []
+	with open('./balance.csv', 'r') as csvfile:
+		for line in csvfile.readlines():
+			col = line.split(',')
+			balance.append([float(col[0]),float(col[1])])
+	return balance
+
+def depth_optimized(depth, balance):
+	index = 0
+	for i in balance:
+		if (depth >= i[0]):
+			index = i
+	depth = depth + index[1]
+	return depth
+
+def convert_row_col_range_to_point(depth, row, col):
+	vratio = (VCENTRE - row) * VPIXEL
+	hratio = (col - HCENTRE) * HPIXEL
+	z = depth + A * depth * depth + B * depth #+ C
+	y = depth * (-vratio)
+	x = depth * hratio
+	return x, y, z
 
 """
 Get Euclidian distance between two 3D points

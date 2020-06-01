@@ -5,16 +5,16 @@ import pyrealsense2 as rs                 # Intel RealSense cross-platform open-
 import math
 import time
 from itertools import combinations
+from statistics import mode, StatisticsError
 import util_functions as uf
+import csv
 
-test = True
+test = False
 labelsPath = "./own_model/data/obj.data"
 LABELS = open(labelsPath).read().strip().split("\n")
 
-np.random.seed(42)
-COLORS = np.random.randint(0, 255, size=(len(LABELS), 3),
-	dtype="uint8")
-
+# read balance file
+balance = uf.read_balance_file()
 
 weightsPath = "./own_model/yolo-obj_90000.weights" #"./yolov3-tiny.weights"#
 configPath = "./own_model/yolo-obj.cfg" #"./yolov3-tiny.cfg"#
@@ -38,7 +38,7 @@ net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA_FP16)
 try:
 	while True:
 		st = time.time()
-		
+
 		#Wait for pair of frames
 		frames = pipeline.wait_for_frames()
 		depth_frame = frames.get_depth_frame()
@@ -49,7 +49,7 @@ try:
 		#Convert images to numpy arrays
 		depth_image = np.asanyarray(depth_frame.get_data())
 		color_image = np.asanyarray(color_frame.get_data())
-		
+
 		#colorized_depth = np.asanyarray(colorizer.colorize(depth_frame).get_data())
 
 		#Apply colormap on depth image (image must be converted to 8-bit)
@@ -64,11 +64,11 @@ try:
 		aligned_depth_frame = frames.get_depth_frame()
 		colorizer = rs.colorizer()
 		colorized_depth = np.asanyarray(colorizer.colorize(aligned_depth_frame).get_data())
-		
+
 		#Stack images horizontally
 		#images = np.hstack((color_image, depth_colormap))
-		
-	
+
+
 		#Show images
 		#cv2.namedWindow('Social Distancing', cv2.WINDOW_AUTOSIZE)
 		#cv2.imshow('Social Distancing', colorized_depth)
@@ -77,7 +77,7 @@ try:
 		if cv2.waitKey(1) & 0xFF == ord('q'):
 			break
 
-		
+
 
 		# retrieve height and with of the frame
 		(H, W) = (color_frame.get_height(), color_frame.get_width())
@@ -119,8 +119,8 @@ try:
 					boxes.append([x, y, int(width), int(height), int(centerX), int(centerY)])
 					confidences.append(float(confidence))
 					classIDs.append(classID)
-		
-		
+
+
 	    # Performs non maximum suppression given boxes and corresponding scores
 	    # https://towardsdatascience.com/non-maximum-suppression-nms-93ce178e177c
 	    # Help us to generate only one bbox for every people in the frame
@@ -138,6 +138,7 @@ try:
 
 		center_bbox = []
 		distances = []
+		distances_opt = []
 		if len(idxs) > 0:
 	            # flatten(): return a copy of the array collapsed into one dimension.
 				for i in idxs.flatten():
@@ -148,8 +149,8 @@ try:
 
 					(torso_upperX, torso_upperY)= (centerX - (h/8), centerY + (h/8) + (h/16))
 					(torso_lowerX, torso_lowerY)= (centerX + (h/8), centerY - ((h/8) + (h/16)))
-					
-					
+
+
 					# print shape only in test mode
 					if(test):
 						cv2.rectangle(colorized_depth, (x, y), (x + w, y + h), white, 2)
@@ -171,18 +172,53 @@ try:
 					# Get data scale from the device and convert to meters
 					depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
 					depth = depth * depth_scale
-					z_axis,_,_,_ = cv2.mean(depth)
-					#z_axis = np.median(depth)
-					
+					#z_axis,_,_,_ = cv2.mean(depth)
+					# remove data from depth matrix whether over a threshold (mode value)
+					depth_mode = []
+					try:
+						mode_depth = mode(depth.flatten())
+						[depth_mode.append(i) for i in depth.flatten() if(i<= mode_depth + 5. and i >= mode_depth - 5.)]
+						z_axis = np.mean(depth_mode)
+					except StatisticsError:
+						print("No unique mode found")
+						z_axis = np.mean(depth)
+
 					try:
 						text = "Distance: " + '{:0.2f}'.format(z_axis) + ' meters'
+						x_opt, y_opt, z_opt = uf.convert_row_col_range_to_point(z_axis, h, w)
+
+						text_opt = "Distance opt: " + '{:0.2f}'.format(uf.depth_optimized(z_axis, balance)) + ' meters'
+						#text_opt = '{:0.2f}'.format(uf.depth_optimized(z_axis)) + ' meters'
+						#print(text)
+						#print(text_opt)
 						#print("distance: " + str(z_axis))
 						# [X, Y, Z, centerX, centerY]
-						distances.append([uf.convert_depth_pixel_to_metric_coordinate(z_axis, float(centerX), float(centerY), intrDepth), centerX, centerY])
+						distances.append([uf.convert_depth_pixel_to_metric_coordinate(uf.depth_optimized(z_axis, balance), float(centerX), float(centerY), intrDepth), centerX, centerY])
+						distances_opt.append([(x_opt, y_opt ,z_opt), centerX, centerY])
 					except RuntimeError:
 						text = "Distance: NaN  meters"
-					cv2.putText(colorized_depth, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX,0.5, white, 2)
-		
+
+					cv2.putText(colorized_depth, text_opt, (x,  y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, white, 2)
+
+					background = np.full((305,500,3), 125, dtype=np.uint8)
+					#cv2.rectangle(background, (20, 60), (510, 760), (170, 170, 170), 2)
+					cv2.putText(background, 'a {:0.2f}'.format(uf.depth_optimized(z_axis, balance)), (10,  250), cv2.FONT_HERSHEY_SIMPLEX, 4.5, white, 2)
+					cv2.putText(background, 'b {:0.2f}'.format(z_axis), (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 4.5, white, 2)
+					cv2.imshow("Social Distancing Analyzer", background)
+
+					"""
+					background = np.full((800,525,3), 125, dtype=np.uint8)
+					cv2.rectangle(background, (20, 60), (510, 760), (170, 170, 170), 2)
+					cv2.putText(background, "Analyzing warning distances", (20, 45),
+								cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+					cv2.rectangle(background, (20, 60), (510, 760), (170, 170, 170), 2)
+					cv2.putText(background, "A->B", (30, 80),
+								cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+					cv2.putText(background, "C->D", (30, 100),
+								cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+					cv2.imshow("Social Distancing Analyzer", background)
+					"""
+
 		if (len(distances) >= 2):
 			# combinations of every bboxes found. Usare il coefficiente binomiale per calcolare le combinazioni rispetto ai bboxes trovati (54 bboxes = 1431)
 			comb = combinations(distances, 2)
@@ -194,7 +230,7 @@ try:
 
 				# i[0][1] = center_X of the first element, i[0][2] = center_Y of the first element
 				# i[1][1] = center_X of the second element, i[1][2] = center_Y of the second element
-				if(social_distance <= 1.5):
+				if(social_distance <= 1.1):
 					cv2.line(colorized_depth,(i[0][1], i[0][2]) , (i[1][1], i[1][2]) , red, 2)
 					cv2.circle(colorized_depth, (i[0][1], i[0][2]), radius=4, color=red_circle, thickness=-1)
 					cv2.circle(colorized_depth, (i[1][1], i[1][2]), radius=4, color=red_circle, thickness=-1)
@@ -202,21 +238,16 @@ try:
 					 if (test):
 						 cv2.line(colorized_depth,(i[0][1], i[0][2]) , (i[1][1], i[1][2]) , green, 2)
 
+				#background = np.full((305,500,3), 125, dtype=np.uint8)
+				#cv2.putText(background, '{:0.2f}'.format(social_distance), (10, 70) , cv2.FONT_HERSHEY_SIMPLEX, 3.5, white, 2)
+				#cv2.imshow("Social Distancing Analyzer", background)
+
 				cv2.putText(colorized_depth, "social distance: " + '{:0.2f}'.format(social_distance), (i[0][1], i[0][2]) , cv2.FONT_HERSHEY_SIMPLEX, 0.5, white, 2)
-		
+
 		cv2.imshow("Social Distancing Viewer", colorized_depth)
-		
-		"""
-		background = np.full((800,525,3), 125, dtype=np.uint8)
-		cv2.putText(background, "Analyzing warning distances", (20, 45),
-					cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-		cv2.rectangle(background, (20, 60), (510, 760), (170, 170, 170), 2)
-		cv2.putText(background, "A->B", (30, 80),
-					cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-		cv2.putText(background, "C->D", (30, 100),
-					cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-		cv2.imshow("Social Distancing Analyzer", background)
-		"""
+
+
+
 		end = time.time()
 		print("Frame Time (all routines) : {:.6f} seconds".format(end - st))
 finally:
