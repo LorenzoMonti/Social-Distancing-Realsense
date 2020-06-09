@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt           # 2D plotting library producing public
 import pyrealsense2 as rs                 # Intel RealSense cross-platform open-source API
 import math
 import time
+#import webview
 
 
 # Constants
@@ -31,6 +32,63 @@ def get_intrinsics(profile):
 	intrc =  profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
 	intrd =  profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
 	return intrc, intrd
+
+def read_balance_file(file):
+	balance = []
+	with open(file, 'r') as csvfile:
+		for line in csvfile.readlines():
+			col = line.split(',')
+			balance.append([float(col[0]),float(col[1])])
+	return balance
+
+def live_plotter(x_vec, y1_data, line1, mean_line, identifier='', pause_time=0.001):
+	if line1==[]:
+		# this is the call to matplotlib that allows dynamic plotting
+		plt.ion()
+		fig = plt.figure(figsize=(13,6))
+		ax = fig.add_subplot(111)
+		# create a variable for the line so we can later update it
+		line1, = ax.plot(x_vec, y1_data, '-o', alpha=0.8)
+		mean_line, = ax.plot(x_vec, [np.mean(y1_data)] * len(x_vec), label='Mean', linestyle='--')
+		ax.legend((line1, line1), ('mean:' + str(np.mean(y1_data)), 'std:' + str(np.std(y1_data))))
+		#update plot label/title
+		plt.ylabel('Z axis')
+		plt.title('{}'.format(identifier))
+		plt.show()
+
+	# after the figure, axis, and line are created, we only need to update the y-data
+	line1.set_ydata(y1_data)
+	mean_line.set_ydata([np.mean(y1_data)] * len(x_vec))
+	plt.legend((line1, line1), ('mean:' + str(np.mean(y1_data)), 'std:' + str(np.std(y1_data))))
+
+	# adjust limits if new data goes beyond bounds
+	if np.min(y1_data)<=line1.axes.get_ylim()[0] or np.max(y1_data)>=line1.axes.get_ylim()[1]:
+		plt.ylim([np.min(y1_data)-np.std(y1_data),np.max(y1_data)+np.std(y1_data)])
+
+	# this pauses the data so the figure/axis can catch up - the amount of pause can be altered above
+	plt.pause(pause_time)
+
+	# return line so we can update it again in the next iteration
+	return line1, mean_line
+
+def depth_optimized(depth, balance):
+	index = 0
+	for i in balance:
+		if (depth >= i[0]):
+			index = i
+	depth = depth + index[1]
+	return depth
+
+# https://www.calvert.ch/maurice/improving-the-depth-map-accuracy-of-realsense-cameras-by-an-order-of-magnitude/
+# https://www.calvert.ch/maurice/2018/11/01/realsense-cameras-calculating-3d-coordinates-from-depth-row-and-column/
+def convert_row_col_range_to_point(depth, row, col):
+	vratio = (VCENTRE - row) * VPIXEL
+	hratio = (col - HCENTRE) * HPIXEL
+	z = depth + A * depth * depth + B * depth #+ C
+	y = depth * (-vratio)
+	x = depth * hratio
+	return x, y, z
+
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 				Euclidian distance method (3D)
@@ -61,29 +119,6 @@ def convert_depth_pixel_to_metric_coordinate(depth, pixel_x, pixel_y, camera_int
 	Y = (pixel_y - camera_intrinsics.ppy)/camera_intrinsics.fy * depth
 	return X, Y, depth
 
-def read_balance_file():
-	balance = []
-	with open('./balance.csv', 'r') as csvfile:
-		for line in csvfile.readlines():
-			col = line.split(',')
-			balance.append([float(col[0]),float(col[1])])
-	return balance
-
-def depth_optimized(depth, balance):
-	index = 0
-	for i in balance:
-		if (depth >= i[0]):
-			index = i
-	depth = depth + index[1]
-	return depth
-
-def convert_row_col_range_to_point(depth, row, col):
-	vratio = (VCENTRE - row) * VPIXEL
-	hratio = (col - HCENTRE) * HPIXEL
-	z = depth + A * depth * depth + B * depth #+ C
-	y = depth * (-vratio)
-	x = depth * hratio
-	return x, y, z
 
 """
 Get Euclidian distance between two 3D points

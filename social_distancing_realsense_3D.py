@@ -4,22 +4,51 @@ import matplotlib.pyplot as plt           # 2D plotting library producing public
 import pyrealsense2 as rs                 # Intel RealSense cross-platform open-source API
 import math
 import time
+import random
 from itertools import combinations
 from statistics import mode, StatisticsError
 import util_functions as uf
 import csv
 
-test = False
-labelsPath = "./own_model/data/obj.data"
-LABELS = open(labelsPath).read().strip().split("\n")
+# test flag
+test = True
+plot = False#True
 
 # read balance file
-balance = uf.read_balance_file()
+balance = uf.read_balance_file('./balance.csv')
+balance2 = uf.read_balance_file('./balance2.csv')
 
+# setup for darknet model
 weightsPath = "./own_model/yolo-obj_90000.weights" #"./yolov3-tiny.weights"#
 configPath = "./own_model/yolo-obj.cfg" #"./yolov3-tiny.cfg"#
 width, height, fps = 1280, 720, 30 # optimal resolution
 
+
+### <REALTIME PLOTTING>
+#matplotlib style
+plt.style.use('ggplot')
+plot_size = 50 # how many point visualize?
+x_vec = np.linspace(0, 50, plot_size + 1)[0:-1]
+y_vec = []
+line1 = []
+mean_line = []
+### </REALTIME PLOTTING>
+
+# Filters pipe [Depth Frame >> Decimation Filter >> Depth2Disparity Transform** -> Spatial Filter >> Temporal Filter >> Disparity2Depth Transform** >> Hole Filling Filter >> Filtered Depth. ]
+decimation = rs.decimation_filter()
+decimation.set_option(rs.option.filter_magnitude, 2)
+depth_to_disparity = rs.disparity_transform(True)
+spatial = rs.spatial_filter()
+spatial.set_option(rs.option.filter_magnitude, 2)
+spatial.set_option(rs.option.filter_smooth_alpha, 0.5)
+spatial.set_option(rs.option.filter_smooth_delta, 20)
+spatial.set_option(rs.option.holes_fill, 3)
+temporal = rs.temporal_filter()
+temporal.set_option(rs.option.filter_smooth_alpha, 0.4)
+disparity_to_depth = rs.disparity_transform(False)
+hole_filling = rs.hole_filling_filter()
+
+# setup
 pipeline = rs.pipeline()
 config = rs.config()
 config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
@@ -27,6 +56,15 @@ config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps) #1920,
 
 #Start Streaming
 profile = pipeline.start(config)
+dev = profile.get_device()
+
+depth_sensor = dev.first_depth_sensor()
+depth_sensor.set_option(rs.option.visual_preset, 3)#set high accuracy: https://github.com/IntelRealSense/librealsense/issues/2577#issuecomment-432137634
+#depth_sensor.set_option(rs.option.laser_power,359)#[0-359]
+
+colorizer = rs.colorizer()
+#colorizer.set_option(rs.option.max_distance,16)#[0-16]
+align = rs.align(rs.stream.color)
 
 intrColor, intrDepth = uf.get_intrinsics(profile)
 
@@ -40,30 +78,50 @@ try:
 		st = time.time()
 
 		#Wait for pair of frames
-		frames = pipeline.wait_for_frames()
-		depth_frame = frames.get_depth_frame()
-		color_frame = frames.get_color_frame()
-		if not depth_frame or not color_frame:
+		#frame = pipeline.wait_for_frames()
+		startt = time.time()
+		for x in range(5):
+			frame = pipeline.wait_for_frames()
+			#frames.append(frameset)
+		end = time.time()
+		print( end - startt)
+		for x in range(len(frame)):
+		#frame = frame.get_depth_frame()
+			#frame = decimation.process(frame).as_frameset()
+			frame = depth_to_disparity.process(frame).as_frameset()
+			frame = spatial.process(frame).as_frameset()
+			frame = temporal.process(frame).as_frameset()
+			frame = disparity_to_depth.process(frame).as_frameset()
+			frame = hole_filling.process(frame).as_frameset()
+		#frame = frame.as_frameset()
+
+		depth_frame = frame.get_depth_frame()
+		color_frame = frame.get_color_frame()
+		if not color_frame and not depth_frame:
 			continue
 
-		#Convert images to numpy arrays
-		depth_image = np.asanyarray(depth_frame.get_data())
-		color_image = np.asanyarray(color_frame.get_data())
 
+		#Convert images to numpy arrays
+		#colorizer = rs.colorizer()
 		#colorized_depth = np.asanyarray(colorizer.colorize(depth_frame).get_data())
 
-		#Apply colormap on depth image (image must be converted to 8-bit)
-		#depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
 
 		# align
 		align = rs.align(rs.stream.color)
-		frames = align.process(frames)
-		#end = time.time()
-		#print("Frame generation Time : {:.6f} seconds".format(end - sta))
+		frames = align.process(frame)
 
-		aligned_depth_frame = frames.get_depth_frame()
 		colorizer = rs.colorizer()
+		aligned_depth_frame = frames.get_depth_frame()
+		#colorizer.set_option(rs.option.max_distance,12)#[0-16]
+		#Convert images to numpy arrays
+		color_image = np.asanyarray(color_frame.get_data())
 		colorized_depth = np.asanyarray(colorizer.colorize(aligned_depth_frame).get_data())
+
+		# TODO
+		### !!!!!!!!!!!!!!!!!!!!!!!!!!!!! ####
+		#colorized_depth = uf.post_process_depth_frame(colorized_depth,temporal_smooth_alpha=0.1, temporal_smooth_delta=80)
+		### !!!!!!!!!!!!!!!!!!!!!!!!!!!!! ####
+
 
 		#Stack images horizontally
 		#images = np.hstack((color_image, depth_colormap))
@@ -147,9 +205,10 @@ try:
 					(centerX, centerY) = (boxes[i][4], boxes[i][5])
 					#center_bbox.append([centerX, centerY])
 
-					(torso_upperX, torso_upperY)= (centerX - (h/8), centerY + (h/8) + (h/16))
-					(torso_lowerX, torso_lowerY)= (centerX + (h/8), centerY - ((h/8) + (h/16)))
-
+					#(torso_upperX, torso_upperY) = (centerX - (h/8), centerY + (h/8) + (h/16))
+					#(torso_lowerX, torso_lowerY) = (centerX + (h/8), centerY - ((h/8) + (h/16)))
+					(torso_upperX, torso_upperY) = (centerX - (h/8), centerY + (h/8))
+					(torso_lowerX, torso_lowerY) = (centerX + (h/8), centerY - ((h/8)))
 
 					# print shape only in test mode
 					if(test):
@@ -174,37 +233,45 @@ try:
 					depth = depth * depth_scale
 					#z_axis,_,_,_ = cv2.mean(depth)
 					# remove data from depth matrix whether over a threshold (mode value)
-					depth_mode = []
+					"""depth_mode = []
 					try:
 						mode_depth = mode(depth.flatten())
 						[depth_mode.append(i) for i in depth.flatten() if(i<= mode_depth + 5. and i >= mode_depth - 5.)]
 						z_axis = np.mean(depth_mode)
 					except StatisticsError:
 						print("No unique mode found")
-						z_axis = np.mean(depth)
+					"""
+					z_axis = np.mean(depth)
 
 					try:
 						text = "Distance: " + '{:0.2f}'.format(z_axis) + ' meters'
 						x_opt, y_opt, z_opt = uf.convert_row_col_range_to_point(z_axis, h, w)
-
 						text_opt = "Distance opt: " + '{:0.2f}'.format(uf.depth_optimized(z_axis, balance)) + ' meters'
-						#text_opt = '{:0.2f}'.format(uf.depth_optimized(z_axis)) + ' meters'
-						#print(text)
-						#print(text_opt)
-						#print("distance: " + str(z_axis))
+
 						# [X, Y, Z, centerX, centerY]
 						distances.append([uf.convert_depth_pixel_to_metric_coordinate(uf.depth_optimized(z_axis, balance), float(centerX), float(centerY), intrDepth), centerX, centerY])
+
+						if(plot):
+							### <REALTIME PLOTTING>
+							if(len(y_vec) >= plot_size):
+								y_vec[-1] = z_axis
+								line1, mean_line = uf.live_plotter(x_vec,y_vec,line1,mean_line,"Realtime Z distance")
+								y_vec = np.append(y_vec[1:],0.0)
+							else:
+								y_vec.append(z_axis)
+								### </REALTIME PLOTTING>
+
 						distances_opt.append([(x_opt, y_opt ,z_opt), centerX, centerY])
 					except RuntimeError:
 						text = "Distance: NaN  meters"
 
 					cv2.putText(colorized_depth, text_opt, (x,  y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, white, 2)
 
-					background = np.full((305,500,3), 125, dtype=np.uint8)
-					#cv2.rectangle(background, (20, 60), (510, 760), (170, 170, 170), 2)
-					cv2.putText(background, 'a {:0.2f}'.format(uf.depth_optimized(z_axis, balance)), (10,  250), cv2.FONT_HERSHEY_SIMPLEX, 4.5, white, 2)
-					cv2.putText(background, 'b {:0.2f}'.format(z_axis), (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 4.5, white, 2)
-					cv2.imshow("Social Distancing Analyzer", background)
+
+
+					#background = np.full((500,800,3), 125, dtype=np.uint8)
+					#cv2.putText(background, '{:0.2f}'.format(z_axis), (10, 190), cv2.FONT_HERSHEY_SIMPLEX, 8.5, white, 2)
+					#cv2.imshow("Personal Distancing Analyzer", background)
 
 					"""
 					background = np.full((800,525,3), 125, dtype=np.uint8)
@@ -242,6 +309,10 @@ try:
 				#cv2.putText(background, '{:0.2f}'.format(social_distance), (10, 70) , cv2.FONT_HERSHEY_SIMPLEX, 3.5, white, 2)
 				#cv2.imshow("Social Distancing Analyzer", background)
 
+				background = np.full((800,525,3), 125, dtype=np.uint8)
+				cv2.putText(background, '{:0.2f}'.format(social_distance), (10, 100) , cv2.FONT_HERSHEY_SIMPLEX, 3.5, white, 2)
+				cv2.imshow("Social Distancing Analyzer", background)
+
 				cv2.putText(colorized_depth, "social distance: " + '{:0.2f}'.format(social_distance), (i[0][1], i[0][2]) , cv2.FONT_HERSHEY_SIMPLEX, 0.5, white, 2)
 
 		cv2.imshow("Social Distancing Viewer", colorized_depth)
@@ -254,3 +325,4 @@ finally:
 
 	#Stop streaming
 	pipeline.stop()
+	cv2.destroyAllWindows()
