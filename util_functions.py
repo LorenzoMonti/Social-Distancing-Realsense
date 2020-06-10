@@ -4,8 +4,6 @@ import matplotlib.pyplot as plt           # 2D plotting library producing public
 import pyrealsense2 as rs                 # Intel RealSense cross-platform open-source API
 import math
 import time
-#import webview
-
 
 # Constants
 COLS = 1280
@@ -24,22 +22,18 @@ HSIZE = math.tan(VFOV / 2) * 2
 VPIXEL = VSIZE / (ROWS - 1)
 HPIXEL = HSIZE / (COLS - 1)
 
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+								PLOT UTIL
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-def get_intrinsics(profile):
-	# Get intrinsics
-	depth_sensor = profile.get_device().first_depth_sensor()
-	cam_scale = depth_sensor.get_depth_scale()
-	intrc =  profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
-	intrd =  profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
-	return intrc, intrd
 
-def read_balance_file(file):
-	balance = []
-	with open(file, 'r') as csvfile:
-		for line in csvfile.readlines():
-			col = line.split(',')
-			balance.append([float(col[0]),float(col[1])])
-	return balance
+def plot_data(z_axis, x_vec, y_vec, plot_size, line1, mean_line, title):
+	if(len(y_vec) >= plot_size):
+		y_vec[-1] = z_axis
+		line1, mean_line = live_plotter(x_vec, y_vec, line1, mean_line, title)
+		y_vec = np.append(y_vec[1:],0.0)
+	else:
+		y_vec.append(z_axis)
 
 def live_plotter(x_vec, y1_data, line1, mean_line, identifier='', pause_time=0.001):
 	if line1==[]:
@@ -71,6 +65,28 @@ def live_plotter(x_vec, y1_data, line1, mean_line, identifier='', pause_time=0.0
 	# return line so we can update it again in the next iteration
 	return line1, mean_line
 
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+								UTILITIES
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+def get_intrinsics(profile):
+	# Get intrinsics
+	depth_sensor = profile.get_device().first_depth_sensor()
+	cam_scale = depth_sensor.get_depth_scale()
+	intrc =  profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
+	intrd =  profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
+	return intrc, intrd
+
+def read_balance_file(file):
+	balance = []
+	with open(file, 'r') as csvfile:
+		for line in csvfile.readlines():
+			col = line.split(',')
+			balance.append([float(col[0]),float(col[1])])
+	return balance
+
+
 def depth_optimized(depth, balance):
 	index = 0
 	for i in balance:
@@ -90,9 +106,9 @@ def convert_row_col_range_to_point(depth, row, col):
 	return x, y, z
 
 
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 				Euclidian distance method (3D)
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 """
 Convert the depth and image point information to metric coordinates
@@ -136,9 +152,9 @@ def euclidian_distance(point1, point2):
 	point2_X, point2_Y, point2_Z = point2[0]
 	return(math.sqrt( (point2_X - point1_X)**2 + (point2_Y - point1_Y)**2 + (point2_Z - point1_Z)**2 ))
 
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 						Carnot Method (2D)
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 # https://medium.com/@manivannan_data/find-the-angle-between-three-points-from-2d-using-python-348c513e2cd
 def getAngle(left, center, right):
