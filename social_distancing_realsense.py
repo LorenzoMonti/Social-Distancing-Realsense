@@ -11,14 +11,15 @@ import util_functions as uf
 import csv
 
 # test flag
-test = False
+test = True
 plot = False
 social_distance_viewer = False
 personal_distance_viewer = False
+filter = False
 
 # read balance file
-balance = uf.read_balance_file('./balance.csv')
-balance2 = uf.read_balance_file('./balance2.csv')
+balance = uf.read_balance_file('./balance_filter.csv')
+
 
 # colors
 white = (255, 255, 255)
@@ -85,20 +86,23 @@ if __name__=='__main__':
 		while True:
 			st = time.time()
 
-			#startt = time.time()
-			for x in range(5):
-				#Wait for pair of frames
-				frame = pipeline.wait_for_frames()
-			#end = time.time()
-			#print( end - startt)
+			if(filter):
+				#startt = time.time()
+				for x in range(5):
+					#Wait for pair of frames
+					frame = pipeline.wait_for_frames()
+				#end = time.time()
+				#print( end - startt)
 
-			for x in range(len(frame)):
-				frame = decimation.process(frame).as_frameset()
-				frame = depth_to_disparity.process(frame).as_frameset()
-				frame = spatial.process(frame).as_frameset()
-				frame = temporal.process(frame).as_frameset()
-				frame = disparity_to_depth.process(frame).as_frameset()
-				frame = hole_filling.process(frame).as_frameset()
+				for x in range(len(frame)):
+					frame = decimation.process(frame).as_frameset()
+					frame = depth_to_disparity.process(frame).as_frameset()
+					frame = spatial.process(frame).as_frameset()
+					frame = temporal.process(frame).as_frameset()
+					frame = disparity_to_depth.process(frame).as_frameset()
+					frame = hole_filling.process(frame).as_frameset()
+			else:
+				frame = pipeline.wait_for_frames()
 
 			depth_frame = frame.get_depth_frame()
 			color_frame = frame.get_color_frame()
@@ -170,13 +174,14 @@ if __name__=='__main__':
 
 
 			distances = []
-			distances_opt = []
+			#distances_opt = []
 			if len(idxs) > 0:
 		            # flatten(): return a copy of the array collapsed into one dimension.
 					for i in idxs.flatten():
 						(x, y) = (boxes[i][0], boxes[i][1])
 						(w, h) = (boxes[i][2], boxes[i][3])
 						(centerX, centerY) = (boxes[i][4], boxes[i][5])
+						identifier = i
 
 						#(torso_upperX, torso_upperY) = (centerX - (h/8), centerY + (h/8) + (h/16))
 						#(torso_lowerX, torso_lowerY) = (centerX + (h/8), centerY - ((h/8) + (h/16)))
@@ -190,6 +195,10 @@ if __name__=='__main__':
 							cv2.circle(colorized_depth, (centerX,centerY), radius=4, color=red, thickness=-1)
 							# torso rectangle
 							cv2.rectangle(colorized_depth, (int(torso_upperX), int(torso_upperY)), (int(torso_lowerX), int(torso_lowerY)), red, 2)
+							# identifier
+							cv2.putText(colorized_depth, "ID: " + '{}'.format(identifier), (x + 10,  y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, white, 2)
+
+
 
 						depth = np.asanyarray(aligned_depth_frame.get_data())
 						# Crop depth data: !!!720x1280(YxX)!!!
@@ -216,7 +225,7 @@ if __name__=='__main__':
 
 						try:
 							text = "Distance: " + '{:0.2f}'.format(z_axis) + ' meters'
-							x_opt, y_opt, z_opt = uf.convert_row_col_range_to_point(z_axis, h, w)
+							#x_opt, y_opt, z_opt = uf.convert_row_col_range_to_point(z_axis, h, w)
 							text_opt = "Distance opt: " + '{:0.2f}'.format(uf.depth_optimized(z_axis, balance)) + ' meters'
 
 							# [X, Y, Z, centerX, centerY]
@@ -229,9 +238,8 @@ if __name__=='__main__':
 									y_vec = np.append(y_vec[1:],0.0)
 								else:
 									y_vec.append(z_axis)
-								#uf.plot_data(z_axis, x_vec, y_vec, plot_size, line1, mean_line, "Realtime Z distance")
 
-							distances_opt.append([(x_opt, y_opt ,z_opt), centerX, centerY])
+							#distances_opt.append([(x_opt, y_opt ,z_opt), centerX, centerY])
 						except RuntimeError:
 							text = "Distance: NaN  meters"
 

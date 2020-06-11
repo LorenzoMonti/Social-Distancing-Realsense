@@ -8,9 +8,23 @@ from statistics import mode, StatisticsError
 import util_functions as uf
 import csv
 
+# test flag
+filter = True
 
+# Filters pipe [Depth Frame >> Decimation Filter >> Depth2Disparity Transform** -> Spatial Filter >> Temporal Filter >> Disparity2Depth Transform** >> Hole Filling Filter >> Filtered Depth. ]
+decimation = rs.decimation_filter()
+decimation.set_option(rs.option.filter_magnitude, 2)
+depth_to_disparity = rs.disparity_transform(True)
+spatial = rs.spatial_filter()
+spatial.set_option(rs.option.filter_magnitude, 2)
+spatial.set_option(rs.option.filter_smooth_alpha, 0.5)
+spatial.set_option(rs.option.filter_smooth_delta, 20)
+spatial.set_option(rs.option.holes_fill, 3)
+temporal = rs.temporal_filter()
+temporal.set_option(rs.option.filter_smooth_alpha, 0.4)
+disparity_to_depth = rs.disparity_transform(False)
+hole_filling = rs.hole_filling_filter()
 
-#uf.init_z_analyzer()
 
 pipeline = rs.pipeline()
 config = rs.config()
@@ -20,6 +34,13 @@ config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps) #1920,
 
 #Start Streaming
 profile = pipeline.start(config)
+dev = profile.get_device()
+
+depth_sensor = dev.first_depth_sensor()
+depth_sensor.set_option(rs.option.visual_preset, 3) # set high accuracy: https://github.com/IntelRealSense/librealsense/issues/2577#issuecomment-432137634
+
+colorizer = rs.colorizer()
+colorizer.set_option(rs.option.max_distance,15)#[0-16]
 
 region_of_interest = []
 roiSelected = False
@@ -28,11 +49,23 @@ z_array = []
 try:
     while True:
         st = time.time()
+        if(filter):
+            for x in range(5):
+                frame = pipeline.wait_for_frames()
 
-        #Wait for pair of frames
-        frames = pipeline.wait_for_frames()
-        depth_frame = frames.get_depth_frame()
-        color_frame = frames.get_color_frame()
+            for x in range(len(frame)):
+                frame = decimation.process(frame).as_frameset()
+                frame = depth_to_disparity.process(frame).as_frameset()
+                frame = spatial.process(frame).as_frameset()
+                frame = temporal.process(frame).as_frameset()
+                frame = disparity_to_depth.process(frame).as_frameset()
+                frame = hole_filling.process(frame).as_frameset()
+
+        else:
+            frame = pipeline.wait_for_frames()
+
+        depth_frame = frame.get_depth_frame()
+        color_frame = frame.get_color_frame()
         if not depth_frame or not color_frame:
             continue
 
@@ -42,9 +75,9 @@ try:
 
         # align
         align = rs.align(rs.stream.color)
-        frames = align.process(frames)
+        frame = align.process(frame)
 
-        aligned_depth_frame = frames.get_depth_frame()
+        aligned_depth_frame = frame.get_depth_frame()
         colorizer = rs.colorizer()
         colorized_depth = np.asanyarray(colorizer.colorize(aligned_depth_frame).get_data())
 
@@ -70,6 +103,13 @@ try:
 
                 if key2 == ord('p'):
                     break
+
+        if key == ord('s'):
+            print("enter real distance: ")
+            real = input()
+            file = open("distance_filter.csv", "a")
+            file.write(str(real) + "," + str(np.mean(z_array)) + "\n")
+            file.close()
 
         cv2.imshow("RGB Viewer", color_image)
         if(roiSelected):
