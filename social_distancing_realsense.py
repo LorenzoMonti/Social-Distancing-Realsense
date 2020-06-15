@@ -13,9 +13,9 @@ import csv
 # test flag
 test = True
 plot = False
-social_distance_viewer = False
+social_distance_viewer = True
 personal_distance_viewer = False
-filter = False
+filter = True
 
 # read balance file
 balance = uf.read_balance_file('./balance_filter.csv')
@@ -41,6 +41,7 @@ y_vec = []
 line1 = []
 mean_line = []
 
+# https://github.com/IntelRealSense/librealsense/blob/jupyter/notebooks/depth_filters.ipynb
 # Filters pipe [Depth Frame >> Decimation Filter >> Depth2Disparity Transform** -> Spatial Filter >> Temporal Filter >> Disparity2Depth Transform** >> Hole Filling Filter >> Filtered Depth. ]
 decimation = rs.decimation_filter()
 decimation.set_option(rs.option.filter_magnitude, 2)
@@ -185,8 +186,8 @@ if __name__=='__main__':
 
 						#(torso_upperX, torso_upperY) = (centerX - (h/8), centerY + (h/8) + (h/16))
 						#(torso_lowerX, torso_lowerY) = (centerX + (h/8), centerY - ((h/8) + (h/16)))
-						(torso_upperX, torso_upperY) = (centerX - (h/8), centerY + (h/8))
-						(torso_lowerX, torso_lowerY) = (centerX + (h/8), centerY - ((h/8)))
+						(torso_upperX, torso_upperY) = (centerX - (h/12), centerY + (h/8))
+						(torso_lowerX, torso_lowerY) = (centerX + (h/12), centerY - (h/8))
 
 						# print shape only in test mode
 						if(test):

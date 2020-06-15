@@ -25,6 +25,7 @@ def carnot(first, second, angle):
 
 
 print("Environment Ready")
+# https://github.com/IntelRealSense/librealsense/blob/jupyter/notebooks/distance_to_object.ipynb
 
 labelsPath = "./own_model/data/obj.data"
 LABELS = open(labelsPath).read().strip().split("\n")

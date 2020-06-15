@@ -13,12 +13,11 @@ import csv
 # test flag
 test = True
 plot = False
-social_distance_viewer = False
+social_distance_viewer = True
 personal_distance_viewer = False
 
 # read balance file
-balance = uf.read_balance_file('./balance.csv')
-balance2 = uf.read_balance_file('./balance2.csv')
+balance = uf.read_balance_file('./balance_filter.csv')
 
 # colors
 white = (255, 255, 255)
@@ -141,7 +140,7 @@ if __name__=='__main__':
 		    # value in @detections array .
 			for i in range(detections.shape[2]):
 				confidence = detections[0, 0, i, 2] # confidence of prediction
-				if confidence >= 0.25: # filter prediction
+				if confidence >= 0.5: # filter prediction
 					class_id = int(detections[0, 0, i, 1]) # Class label
 					print(class_id)
 					if class_id == 1: # person
@@ -263,7 +262,7 @@ if __name__=='__main__':
 							 cv2.line(colorized_depth,(i[0][1], i[0][2]) , (i[1][1], i[1][2]) , green, 2)
 
 					cv2.putText(colorized_depth, "social distance: " + '{:0.2f}'.format(social_distance), (i[0][1], i[0][2]) , cv2.FONT_HERSHEY_SIMPLEX, 0.5, white, 2)
-
+					print(social_distance_viewer)
 					if(social_distance_viewer):
 						background = np.full((800,525,3), 125, dtype=np.uint8)
 						cv2.putText(background, '{:0.2f}'.format(social_distance), (10, 100) , cv2.FONT_HERSHEY_SIMPLEX, 3.5, white, 2)
