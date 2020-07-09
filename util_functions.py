@@ -9,19 +9,6 @@ import time
 COLS = 1280
 ROWS = 720
 
-HFOV = 1.18997230395261 # 1.18124533204579
-VFOV = 0.726878003768506 # 0.72083537591355
-VCENTRE = (ROWS - 1) / float(2)
-HCENTRE = (COLS -1) / float(2)
-A = -3.38769422283892e-06 # -6.74058700563481e-06
-B = -0.0039721384171171 # 0.0162142413358919
-C = 1.35603974925075 # -15.1823712120162
-
-VSIZE = math.tan(VFOV / 2) * 2
-HSIZE = math.tan(VFOV / 2) * 2
-VPIXEL = VSIZE / (ROWS - 1)
-HPIXEL = HSIZE / (COLS - 1)
-
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 								PLOT UTIL
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -77,6 +64,24 @@ def get_intrinsics(profile):
 	intrc =  profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
 	intrd =  profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
 	return intrc, intrd
+	
+# find connected cameras
+def find_connected_cameras():
+	realsense_ctx = rs.context()
+	connected_devices = []
+	for i in range(len(realsense_ctx.devices)):
+		detected_camera = realsense_ctx.devices[i].get_info(rs.camera_info.serial_number)
+		connected_devices.append(detected_camera)
+	return connected_devices
+
+# get_extrinsics_to(self: pyrealsense2.stream_profile, to: pyrealsense2.stream_profile) → pyrealsense2.extrinsics,
+#Get the extrinsic transformation between two profiles (representing physical sensors)
+
+# get_device_extrinsics(from_stream, to_stream)
+# Retrieve extrinsic transformation between the viewpoints of two different streams.
+
+# rs2_transform_point_to_point(...)
+# Transform 3D coordinates relative to one sensor to 3D coordinates relative to another viewpoint
 
 def read_balance_file(file):
 	balance = []

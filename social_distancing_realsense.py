@@ -5,60 +5,23 @@ import pyrealsense2 as rs                 # Intel RealSense cross-platform open-
 import math
 import time
 import random
+import csv
 from itertools import combinations
 from statistics import mode, StatisticsError
 import util_functions as uf
-import csv
-
-# test flag
-test = True
-plot = False
-social_distance_viewer = True
-personal_distance_viewer = False
-filter = True
+from constants import *
+from setup_camera import *
 
 # read balance file
 balance = uf.read_balance_file('./balance_filter.csv')
 
-
-# colors
-white = (255, 255, 255)
-red = (0, 0, 255)
-red_circle = (0, 0, 204)
-green = (0, 255, 0)
-
-# setup for darknet model
-weightsPath = "./own_model/yolo-obj_65000.weights" #"./yolov3-tiny.weights"#
-configPath = "./own_model/yolo-obj.cfg" #"./yolov3-tiny.cfg"#
-width, height, fps = 1280, 720, 30 # optimal resolution
-
-# realtime plotting
-# matplotlib style
-plt.style.use('ggplot')
-plot_size = 50 # how many point visualize?
-x_vec = np.linspace(0, 50, plot_size + 1)[0:-1]
-y_vec = []
-line1 = []
-mean_line = []
-
-# https://github.com/IntelRealSense/librealsense/blob/jupyter/notebooks/depth_filters.ipynb
-# Filters pipe [Depth Frame >> Decimation Filter >> Depth2Disparity Transform** -> Spatial Filter >> Temporal Filter >> Disparity2Depth Transform** >> Hole Filling Filter >> Filtered Depth. ]
-decimation = rs.decimation_filter()
-decimation.set_option(rs.option.filter_magnitude, 2)
-depth_to_disparity = rs.disparity_transform(True)
-spatial = rs.spatial_filter()
-spatial.set_option(rs.option.filter_magnitude, 2)
-spatial.set_option(rs.option.filter_smooth_alpha, 0.5)
-spatial.set_option(rs.option.filter_smooth_delta, 20)
-spatial.set_option(rs.option.holes_fill, 3)
-temporal = rs.temporal_filter()
-temporal.set_option(rs.option.filter_smooth_alpha, 0.4)
-disparity_to_depth = rs.disparity_transform(False)
-hole_filling = rs.hole_filling_filter()
+# find connected devices
+connected_devices = uf.find_connected_cameras()
 
 # setup
 pipeline = rs.pipeline()
 config = rs.config()
+config.enable_device(connected_devices[0])
 config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
 config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps) #1920, 1080
 
@@ -75,19 +38,14 @@ align = rs.align(rs.stream.color)
 
 intrColor, intrDepth = uf.get_intrinsics(profile)
 
-# DARKNET
-net = cv2.dnn.readNetFromDarknet(configPath, weightsPath)
-net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA_FP16)
-
-
 if __name__=='__main__':
 
 	try:
 		while True:
 			st = time.time()
+			background_eye = np.full((800,525,3), 125, dtype=np.uint8) # background for bird's eye
 
-			if(filter):
+			if(filter): # with filters
 				#startt = time.time()
 				for x in range(5):
 					#Wait for pair of frames
@@ -102,13 +60,14 @@ if __name__=='__main__':
 					frame = temporal.process(frame).as_frameset()
 					frame = disparity_to_depth.process(frame).as_frameset()
 					frame = hole_filling.process(frame).as_frameset()
-			else:
+			else: # whitout filters
 				frame = pipeline.wait_for_frames()
 
 			depth_frame = frame.get_depth_frame()
 			color_frame = frame.get_color_frame()
 			if not color_frame and not depth_frame:
 				continue
+
 
 			# align
 			align = rs.align(rs.stream.color)
@@ -118,6 +77,12 @@ if __name__=='__main__':
 			#Convert images to numpy arrays
 			color_image = np.asanyarray(color_frame.get_data())
 			colorized_depth = np.asanyarray(colorizer.colorize(aligned_depth_frame).get_data())
+
+			# FOR POINTS PROJECTION !!!Intrinsics & Extrinsics!!!
+			depth_intrin = aligned_depth_frame.profile.as_video_stream_profile().intrinsics
+			color_intrin = color_frame.profile.as_video_stream_profile().intrinsics
+			#  Get the extrinsic transformation between two profiles (representing physical sensors)
+			depth_to_color_extrin = aligned_depth_frame.profile.get_extrinsics_to(color_frame.profile)
 
 			if cv2.waitKey(1) & 0xFF == ord('q'):
 				break
@@ -208,6 +173,14 @@ if __name__=='__main__':
 						depth = depth[int(torso_lowerY):int(torso_upperY), int(torso_upperX):int(torso_lowerX)].astype(float)
 						#depth = depth[int(centerY):int(centerY+1), int(centerX):int(centerX+1)].astype(float)
 
+						"""
+						source: https://dev.intelrealsense.com/docs/projection-in-intel-realsense-sdk-20#section-depth-image-formats
+
+						Depth is stored as one unsigned 16-bit integer per pixel, mapped linearly to depth in camera-specific units.
+						The distance, in meters, corresponding to one integer increment in depth values can be queried via rs2_get_depth_scale(...)
+						or using a rs2::depth_sensor via get_depth_scale() (see example here).
+						The following shows how to retrieve the depth of a pixel in meters:
+						"""
 						# Get data scale from the device and convert to meters
 						depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
 						depth = depth * depth_scale
@@ -229,8 +202,17 @@ if __name__=='__main__':
 							#x_opt, y_opt, z_opt = uf.convert_row_col_range_to_point(z_axis, h, w)
 							text_opt = "Distance opt: " + '{:0.2f}'.format(uf.depth_optimized(z_axis, balance)) + ' meters'
 
-							# [X, Y, Z, centerX, centerY]
+
+
 							distances.append([uf.convert_depth_pixel_to_metric_coordinate(uf.depth_optimized(z_axis, balance), float(centerX), float(centerY), intrDepth), centerX, centerY])
+
+							# !!! FOR POINTS PROJECTION
+							print(distances[i][0])
+							color_point = rs.rs2_transform_point_to_point(depth_to_color_extrin, list(distances[i][0]))
+
+							if(bird_eye):
+								cv2.circle(background_eye, (400 + (int(distances[i][0][0] * 50)), int(distances[i][0][2] * 50)), radius=8, color=green, thickness=-1)
+								cv2.circle(background_eye, (380 + (int(color_point[0] * 50)), int(color_point[2] * 50)), radius=8, color=red, thickness=-1) # other perspective
 
 							if(plot):
 								if(len(y_vec) >= plot_size):
@@ -284,11 +266,12 @@ if __name__=='__main__':
 					cv2.putText(colorized_depth, "social distance: " + '{:0.2f}'.format(social_distance), (i[0][1], i[0][2]) , cv2.FONT_HERSHEY_SIMPLEX, 0.5, white, 2)
 
 					if(social_distance_viewer):
-						background = np.full((800,525,3), 125, dtype=np.uint8)
 						cv2.putText(background, '{:0.2f}'.format(social_distance), (10, 100) , cv2.FONT_HERSHEY_SIMPLEX, 3.5, white, 2)
 						cv2.imshow("Social Distancing Analyzer", background)
 
 			cv2.imshow("Social Distancing Viewer", colorized_depth)
+			if(bird_eye):
+				cv2.imshow("Bird eye viewer", background_eye)
 
 
 
